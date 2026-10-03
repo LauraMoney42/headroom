@@ -28,6 +28,14 @@ pub enum ProxyError {
     #[error("request body exceeds configured limit: {0}")]
     PayloadTooLarge(String),
 
+    /// The request path, or a decoded route parameter, would have to be
+    /// rewritten on the way upstream (dot segments, backslashes, or a
+    /// segment that would gain or lose a `/` boundary). The proxy forwards
+    /// paths verbatim or not at all — see `crate::upstream_path`. RFC 7231
+    /// §6.5.1: 400.
+    #[error("request path rejected: {0}")]
+    InvalidPath(String),
+
     /// Surfaced when `--compression` is enabled but the proxy can't
     /// build the IntelligentContextManager at startup (e.g. the
     /// embedded tokenizer asset failed to initialize). Bubbles up to
@@ -37,6 +45,12 @@ pub enum ProxyError {
     /// LLM request.
     #[error("compression engine startup failed: {0}")]
     CompressionStartup(String),
+}
+
+impl From<crate::upstream_path::PathError> for ProxyError {
+    fn from(e: crate::upstream_path::PathError) -> Self {
+        ProxyError::InvalidPath(e.to_string())
+    }
 }
 
 impl IntoResponse for ProxyError {
@@ -67,8 +81,10 @@ impl IntoResponse for ProxyError {
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "request body exceeds configured limit",
             ),
+            ProxyError::InvalidPath(_) => (StatusCode::BAD_REQUEST, "invalid request"),
             ProxyError::WebSocket(_) => (StatusCode::BAD_GATEWAY, "upstream request failed"),
             ProxyError::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal error"),
+
             // CompressionStartup is a startup-time error, not a
             // per-request one — but if it ever surfaces in the
             // handler path, surface as 500 rather than panic.
